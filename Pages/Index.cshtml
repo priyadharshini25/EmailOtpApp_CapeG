@@ -1,0 +1,174 @@
+﻿@page
+@model EmailOtpApp.Pages.IndexModel
+@{
+    ViewData["Title"] = "Home Page";
+}
+<link rel="stylesheet" href="~/css/site.css" />
+<style>
+    .container {
+        display: flex;
+        flex-direction: row;
+    }
+    .left-pane {
+        flex: 1;
+        padding: 20px;
+        background-color: #f8f9fa; /* Light background for left pane */
+    }
+    .right-pane {
+        width: 300px; /* Fixed width for the right pane */
+        padding: 20px;
+        background-color: #e9ecef; /* Light background for right pane */
+        border-left: 1px solid #ccc; /* Optional border for separation */
+    }
+</style>
+
+<h2>OTP Verification</h2>
+
+<div class="container">
+    <div class="left-pane">
+        <div>
+            <input type="email" id="email" placeholder="Enter your email" required />
+            <button id="sendOtpBtn">Send OTP</button>
+        </div>
+        <div>
+            <input type="text" id="otp" placeholder="Enter OTP" required />
+            <button id="verifyOtpBtn">Verify OTP</button>
+        </div>
+        <div>
+            <button id="getOtpBtn" hidden>Get OTP</button>
+            <div id="otpText"></div>
+            <div id="otpValue" hidden></div>
+        </div>
+    </div>
+    <div class="right-pane">
+        <h3>Email Body</h3>
+        <p id="toEmail"></p>
+        <p id="emailBody">Your OTP is xxxxxx. This is valid for 1 minute</p>
+    </div>
+</div>
+
+<h2>Validations</h2>
+
+<div class="container">
+    <div class="left-pane">
+        <p id="status"></p>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const validSeconds = 60;
+        let remainingSeconds = 0;
+        let failedAttempts = 0;
+        const maxAttempts = 10;
+
+        const otpValueElt = document.getElementById("otpValue");
+        const otpTextDiv = document.getElementById('otpText');
+        const emailBody = document.getElementById('emailBody');
+        const status = document.getElementById('status');
+
+        document.getElementById('sendOtpBtn').addEventListener('click', sendOtp);
+        document.getElementById('verifyOtpBtn').addEventListener('click', verifyOtp);
+        document.getElementById("getOtpBtn").addEventListener("click", getOtp);
+
+        async function sendOtp() {
+            const email = document.getElementById('email').value;
+            const response = await fetch('/otp/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(email)
+            });
+            const data = await response.json();
+            handleOtpResponse(response, data);
+        }
+
+        function handleOtpResponse(response, data) {
+            otpTextDiv.textContent = "";
+            emailBody.textContent = "";
+
+            if (data.statusCode === 401) {
+                status.textContent = 'Invalid Email. Please check whether the email ends with "dso.org.sg".';
+                otpValueElt.innerText = "";
+                remainingSeconds = -1;
+            } else if (data.statusCode === 200) {
+                status.textContent = 'OTP sent successfully!';
+                otpValueElt.innerText = data.otp;
+                emailBody.textContent = data.emailBody;
+                startOtpTimer(validSeconds);
+            } else {
+                status.textContent = 'Error sending OTP.';
+                emailBody.textContent = data.emailBody;
+                console.error(response);
+            }
+        }
+
+        async function verifyOtp() {
+            if (failedAttempts >= maxAttempts) {
+                status.textContent = 'You have reached the maximum number of attempts. Please try again later.';
+                return;
+            }
+
+            const otp = document.getElementById('otp').value;
+            const response = await fetch('/otp/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ otp })
+            });
+
+            console.log("***verifyOtp",response);
+            otpTextDiv.textContent = '';
+            // remainingSeconds = -1;
+
+            if (response.ok) {
+                remainingSeconds = 0;
+                status.textContent = 'OTP verified successfully!';
+                failedAttempts = 0; // Reset on successful verification
+            } else {
+                failedAttempts++;
+                status.textContent = failedAttempts < maxAttempts ? 
+                    'Invalid OTP or OTP expired. Attempts remaining: ' + (maxAttempts - failedAttempts) : 
+                    'You have reached the maximum number of attempts. Please try again later.';
+            }
+        }
+
+        function getOtp() {
+            fetch('/Otp/generate')
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.text();
+                })
+                .then(data => {
+                    otpValueElt.innerText = data;
+                    emailBody.innerText = `Your OTP is ${data}. This is valid for 1 minute`;
+                    startOtpTimer(validSeconds);
+                })
+                .catch(error => {
+                    console.error("Error fetching data:", error);
+                });
+        }
+
+        function startOtpTimer(validSeconds) {
+            remainingSeconds = validSeconds;
+
+            // Function to update the OTP text every second
+            const updateText = () => {
+                const text = `Your OTP is valid for ${remainingSeconds} seconds.`;
+                otpTextDiv.innerText = text;
+                remainingSeconds--;
+
+                // Stop updating after the time is up
+                if (remainingSeconds == 0) {
+                    clearInterval(interval);
+                    otpTextDiv.innerText = `OTP expired. Click Get OTP button to generate new OTP.`;
+                } else if (remainingSeconds <= -1) {
+                    clearInterval(interval);
+                    otpTextDiv.innerText = "";
+                }
+
+            };
+
+            // Update the text every second
+            const interval = setInterval(updateText, 1000);
+        }
+    </script>
+}
